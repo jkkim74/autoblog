@@ -57,6 +57,48 @@ publishers:
         )
 
 
+def test_bedrock_requires_aws_region(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            _write(
+                tmp_path,
+                """
+generator:
+  type: claude
+  provider: bedrock
+sources:
+  - type: rss
+    name: X
+    url: u
+publishers:
+  - type: markdown
+""",
+            )
+        )
+
+
+def test_bedrock_with_region_ok(tmp_path):
+    cfg = load_config(
+        _write(
+            tmp_path,
+            """
+generator:
+  type: claude
+  provider: bedrock
+  aws_region: us-east-1
+sources:
+  - type: rss
+    name: X
+    url: u
+publishers:
+  - type: markdown
+""",
+        )
+    )
+    assert cfg.generator.provider == "bedrock"
+    assert cfg.generator.aws_region == "us-east-1"
+
+
 def test_unknown_keys_are_ignored(tmp_path):
     cfg = load_config(
         _write(

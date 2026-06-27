@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .validation import DEFAULT_FORBIDDEN
+
 
 class ConfigError(ValueError):
     """Raised when the config file is missing required fields or malformed."""
@@ -25,6 +27,10 @@ class GeneratorConfig:
     type: str = "claude"
     model: str = "claude-opus-4-8"
     effort: str = "high"
+    # Which SDK client to use: "anthropic" (API key) or "bedrock" (AWS IAM).
+    provider: str = "anthropic"
+    # Required when provider == "bedrock".
+    aws_region: str = ""
 
 
 @dataclass(slots=True)
@@ -41,11 +47,29 @@ class PublisherConfig:
 
 
 @dataclass(slots=True)
+class NaverConfig:
+    heading_px: int = 22
+    body_px: int = 18
+
+
+@dataclass(slots=True)
 class Config:
     blog: BlogConfig
     generator: GeneratorConfig
     sources: list[SourceConfig]
     publishers: list[PublisherConfig]
+    # File used to remember which source items were already published.
+    state_file: str = ".autoblog-state.json"
+    # Over-promise / hype phrases flagged for human review (Naver flow).
+    forbidden_expressions: list[str] = field(
+        default_factory=lambda: list(DEFAULT_FORBIDDEN)
+    )
+    naver: NaverConfig = field(default_factory=NaverConfig)
+
+
+def default_config() -> Config:
+    """A usable Config with no sources/publishers, for the keyword `write` flow."""
+    return Config(blog=BlogConfig(), generator=GeneratorConfig(), sources=[], publishers=[])
 
 
 def load_config(path: str | Path) -> Config:
@@ -60,6 +84,8 @@ def load_config(path: str | Path) -> Config:
 
     blog = BlogConfig(**_subdict(raw.get("blog", {}), BlogConfig))
     generator = GeneratorConfig(**_subdict(raw.get("generator", {}), GeneratorConfig))
+    if generator.provider == "bedrock" and not generator.aws_region:
+        raise ConfigError("generator.provider 'bedrock' requires 'aws_region'.")
 
     sources = [_parse_source(s) for s in raw.get("sources", [])]
     if not sources:
@@ -69,7 +95,19 @@ def load_config(path: str | Path) -> Config:
     if not publishers:
         raise ConfigError("At least one publisher is required under 'publishers'.")
 
-    return Config(blog=blog, generator=generator, sources=sources, publishers=publishers)
+    state_file = raw.get("state_file", ".autoblog-state.json")
+    forbidden = raw.get("forbidden_expressions") or list(DEFAULT_FORBIDDEN)
+    naver = NaverConfig(**_subdict(raw.get("naver", {}), NaverConfig))
+
+    return Config(
+        blog=blog,
+        generator=generator,
+        sources=sources,
+        publishers=publishers,
+        state_file=state_file,
+        forbidden_expressions=forbidden,
+        naver=naver,
+    )
 
 
 def _subdict(data: dict[str, Any], cls: type) -> dict[str, Any]:

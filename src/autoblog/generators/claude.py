@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import json
 
-import anthropic
 from slugify import slugify
 
 from ..config import BlogConfig, GeneratorConfig
 from ..models import Post, SourceItem
 from .base import Generator
+from .client import build_client, resolve_model_id
 
 # Structured-output schema. With output_config.format the model is constrained
 # to emit exactly this shape, so json.loads on the final text block is safe.
@@ -35,8 +35,8 @@ class ClaudeGenerator(Generator):
     def __init__(self, cfg: GeneratorConfig, blog: BlogConfig) -> None:
         self.cfg = cfg
         self.blog = blog
-        # Resolves ANTHROPIC_API_KEY from the environment.
-        self.client = anthropic.Anthropic()
+        self.client = build_client(cfg)
+        self.model_id = resolve_model_id(cfg)
 
     def generate(self, items: list[SourceItem]) -> Post:
         if not items:
@@ -52,7 +52,7 @@ class ClaudeGenerator(Generator):
         )
 
         with self.client.messages.stream(
-            model=self.cfg.model,
+            model=self.model_id,
             max_tokens=16000,
             system=system,
             thinking={"type": "adaptive"},
@@ -66,9 +66,20 @@ class ClaudeGenerator(Generator):
 
         if message.stop_reason == "refusal":
             raise RuntimeError("Claude refused to generate this post (safety stop).")
+        if message.stop_reason == "max_tokens":
+            raise RuntimeError(
+                "Generation hit the max_tokens limit, so the JSON output is truncated. "
+                "Lower 'target_words' or raise max_tokens in ClaudeGenerator."
+            )
 
         text = next((b.text for b in message.content if b.type == "text"), "")
-        data = json.loads(text)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Claude returned output that is not valid JSON (stop_reason="
+                f"{message.stop_reason!r}): {exc}"
+            ) from exc
 
         return Post(
             title=data["title"],

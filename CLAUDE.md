@@ -27,9 +27,18 @@ sources ──▶ generator (Claude) ──▶ publishers
 ```
 
 `pipeline.run()` (`src/autoblog/pipeline.py`) is the orchestrator: it collects
-`SourceItem`s from **all** sources, passes the combined list to **one**
-generator to produce a single `Post`, then hands that post to **every**
-configured publisher. One run = one post synthesized from all source material.
+`SourceItem`s from **all** sources, filters out already-seen items via
+`state.SeenStore`, passes the remaining combined list to **one** generator to
+produce a single `Post`, then hands that post to **every** configured publisher.
+One run = one post synthesized from all *new* source material.
+
+**Dedup / state.** `state.SeenStore` (`src/autoblog/state.py`) is a JSON set of
+published item URLs (`config.state_file`, default `.autoblog-state.json`). The
+tool is meant to run on a schedule, so this is what prevents duplicate posts
+across runs. State is recorded **only after a successful publish** and **not at
+all on `dry_run`** (so dry runs stay repeatable); `use_state=False` /
+`--no-state` bypasses it entirely. Tests must point `state_file` at a tmp path
+(see `tests/test_pipeline.py:_config`) or they'll write to the cwd.
 
 The two domain objects in `models.py` are the contracts between stages:
 `SourceItem` (raw material in) and `Post` (finished article out). Everything
@@ -60,6 +69,35 @@ plugin's `__init__` signature defines its accepted config keys. Unknown keys on
 the typed dataclasses are silently dropped (`_subdict`); unknown plugin options
 become a `TypeError` at construction.
 
+### Naver review-package flow (`write` command)
+
+A second, parallel flow for Korean/Naver-blog content, separate from the
+RSS→`run` pipeline. `cli.py:_cmd_write` takes a keyword and produces a
+human-review package — **it never publishes externally** (Naver's write API was
+retired in 2020; the design target is "automate up to paste-ready HTML, human
+posts"). Pieces:
+
+- `generators/naver.py:NaverArticleGenerator` — one structured-output API call
+  (same SDK conventions as the Claude generator) returning title candidates,
+  outline, Markdown body, SEO, and review notes as a typed `Article`
+  (`models.py`). **The model does not produce HTML.**
+- `publishers/naver_html.py:markdown_to_naver_html` — **deterministic**
+  Markdown→inline-styled HTML (소제목 `heading_px`/본문 `body_px`, image
+  placeholders). Keep it deterministic and unit-tested; do not move HTML
+  rendering into the model. It supports only a Markdown subset (headings,
+  paragraphs, `- ` lists, `**bold**`, links, `![alt](IMAGE)`), and the
+  generator's prompt is what constrains the model to that subset — change them
+  together.
+- `validation.py:scan_forbidden` — cheap regex scan (no LLM) for over-promise
+  phrasing, merged into `Article.review.warnings` in `_cmd_write`.
+- `publishers/naver_artifact.py:NaverArtifactPublisher` — writes the five files
+  (`outline.md`, `final.md`, `naver.html`, `seo.json`, `review.md`) to
+  `content/YYYY-MM-DD_slug/`.
+
+Config for this flow (`config.forbidden_expressions`, `config.naver`) is
+optional: `write` falls back to `config.default_config()` when no config file
+exists, so a bare `autoblog write "<keyword>"` works.
+
 ### Claude generator specifics
 
 `generators/claude.py` is the only code that calls the Anthropic API. It uses
@@ -77,6 +115,18 @@ the official `anthropic` SDK with the model from config (default
 
 When editing this file, prefer the current SDK shapes above over any older
 patterns (e.g. `output_format`, `budget_tokens`, non-streaming large outputs).
+
+### Provider abstraction (Anthropic vs Bedrock)
+
+Generators do **not** construct the SDK client directly — they call
+`generators/client.py:build_client(cfg)` and `resolve_model_id(cfg)`. This is the
+single place that switches between the first-party API (`anthropic.Anthropic()`,
+`ANTHROPIC_API_KEY`) and AWS Bedrock (`AnthropicBedrockMantle(aws_region=...)`,
+AWS IAM). Bedrock model IDs get an `anthropic.` prefix via `resolve_model_id`;
+both providers share the same `messages.stream(...)` surface, so generator bodies
+are provider-agnostic. `config.GeneratorConfig` carries `provider` + `aws_region`
+(validated in `load_config`: `bedrock` requires a region). When adding a
+generator, use `build_client`/`resolve_model_id` — never hardcode `anthropic.Anthropic()`.
 
 ## Conventions
 

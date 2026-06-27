@@ -10,6 +10,7 @@ from .generators import build_generator
 from .models import Post, SourceItem
 from .publishers import build_publisher
 from .sources import build_source
+from .state import SeenStore
 
 log = logging.getLogger("autoblog")
 
@@ -21,15 +22,26 @@ class RunResult:
     items_collected: int
 
 
-def run(config: Config, *, dry_run: bool = False) -> RunResult:
+def run(config: Config, *, dry_run: bool = False, use_state: bool = True) -> RunResult:
     """Execute one full pipeline pass.
 
     A single post is generated from the combined material of all sources. With
-    dry_run=True, the post is generated but not published.
+    dry_run=True, the post is generated but not published (and seen-state is not
+    recorded). With use_state=True, items already published in a previous run
+    are skipped, so repeated/scheduled runs don't produce duplicate posts.
     """
+    store = SeenStore(config.state_file) if use_state else None
+
     items = _collect_items(config)
+    if store is not None:
+        before = len(items)
+        items = [item for item in items if not store.is_seen(item.url)]
+        skipped = before - len(items)
+        if skipped:
+            log.info("Skipped %d already-published item(s).", skipped)
+
     if not items:
-        log.warning("No source items collected; nothing to generate.")
+        log.warning("No new source items; nothing to generate.")
         return RunResult(post=None, locations=[], items_collected=0)
 
     generator = build_generator(config.generator, config.blog)
@@ -38,7 +50,7 @@ def run(config: Config, *, dry_run: bool = False) -> RunResult:
     log.info("Generated post: %s", post.title)
 
     if dry_run:
-        log.info("Dry run: skipping publish.")
+        log.info("Dry run: skipping publish and state update.")
         return RunResult(post=post, locations=[], items_collected=len(items))
 
     locations: list[str] = []
@@ -47,6 +59,12 @@ def run(config: Config, *, dry_run: bool = False) -> RunResult:
         location = publisher.publish(post)
         log.info("Published via %s -> %s", pub_cfg.type, location)
         locations.append(location)
+
+    # Only record state after a successful publish, so a failure mid-run can be
+    # retried against the same items.
+    if store is not None:
+        store.add(item.url for item in items)
+        store.save()
 
     return RunResult(post=post, locations=locations, items_collected=len(items))
 

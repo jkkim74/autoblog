@@ -17,6 +17,9 @@ venv/
 .env
 config.yaml
 
+# Runtime state (which items were already published)
+.autoblog-state.json
+
 # Generated output
 content/
 out/

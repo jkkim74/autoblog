@@ -38,6 +38,7 @@ def _config(tmp_path):
         generator=GeneratorConfig(type="fake"),
         sources=[SourceConfig(type="fake", name="Fake", options={})],
         publishers=[PublisherConfig(type="markdown", options={"output_dir": str(tmp_path)})],
+        state_file=str(tmp_path / "state.json"),
     )
 
 
@@ -62,3 +63,37 @@ def test_dry_run_skips_publish(tmp_path, monkeypatch):
     assert result.post is not None
     assert result.locations == []
     assert not list(tmp_path.glob("*.md"))
+
+
+def test_state_dedup_skips_already_published(tmp_path, monkeypatch):
+    monkeypatch.setitem(SRC_REGISTRY, "fake", FakeSource)
+    monkeypatch.setitem(GEN_REGISTRY, "fake", FakeGenerator)
+    config = _config(tmp_path)
+
+    first = run(config)
+    assert first.post is not None  # first run publishes
+
+    second = run(config)
+    assert second.post is None  # same item is now seen -> nothing new
+    assert second.items_collected == 0
+
+
+def test_dry_run_does_not_record_state(tmp_path, monkeypatch):
+    monkeypatch.setitem(SRC_REGISTRY, "fake", FakeSource)
+    monkeypatch.setitem(GEN_REGISTRY, "fake", FakeGenerator)
+    config = _config(tmp_path)
+
+    run(config, dry_run=True)
+    # A real run afterwards should still see the item as new.
+    result = run(config)
+    assert result.post is not None
+
+
+def test_no_state_disables_dedup(tmp_path, monkeypatch):
+    monkeypatch.setitem(SRC_REGISTRY, "fake", FakeSource)
+    monkeypatch.setitem(GEN_REGISTRY, "fake", FakeGenerator)
+    config = _config(tmp_path)
+
+    run(config, use_state=False)
+    second = run(config, use_state=False)
+    assert second.post is not None  # no state kept -> item is "new" every time

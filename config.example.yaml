@@ -1,5 +1,21 @@
 # Copy to config.yaml and edit. Run with: autoblog run --config config.yaml
 
+# Tracks which source items were already published so repeated/scheduled runs
+# don't regenerate duplicate posts. Delete this file to "forget" everything.
+state_file: .autoblog-state.json
+
+# Used by the `write` (Naver review-package) flow.
+# Hype/over-promise phrases flagged into review.md for the human reviewer.
+forbidden_expressions:
+  - 무조건
+  - 100%
+  - 보장
+  - 확정 수익
+# Font sizes for the deterministic Naver HTML renderer.
+naver:
+  heading_px: 22
+  body_px: 18
+
 # How posts are produced. Both source aggregation and AI generation are used:
 # items are pulled from sources, then Claude rewrites/summarizes them into an
 # original post.
@@ -17,6 +33,12 @@ generator:
   model: claude-opus-4-8
   # "high" balances quality and cost; use "max" for the most thorough drafts.
   effort: high
+  # provider: anthropic (ANTHROPIC_API_KEY) or bedrock (AWS IAM, no Anthropic key).
+  provider: anthropic
+  # For provider: bedrock — required. The model must be enabled in this region's
+  # Bedrock console; the SDK prefixes the id with "anthropic." automatically.
+  # provider: bedrock
+  # aws_region: us-east-1
 
 sources:
   - type: rss

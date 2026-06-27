@@ -22,6 +22,11 @@ class MarkdownPublisher(Publisher):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         date = post.created_at.strftime("%Y-%m-%d")
         path = self.output_dir / f"{date}-{post.slug}.md"
+        # Avoid silently overwriting an existing post with the same date+slug.
+        counter = 2
+        while path.exists():
+            path = self.output_dir / f"{date}-{post.slug}-{counter}.md"
+            counter += 1
 
         front_matter = {
             "title": post.title,
