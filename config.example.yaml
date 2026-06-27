@@ -1,0 +1,36 @@
+# Copy to config.yaml and edit. Run with: autoblog run --config config.yaml
+
+# How posts are produced. Both source aggregation and AI generation are used:
+# items are pulled from sources, then Claude rewrites/summarizes them into an
+# original post.
+blog:
+  title: "My Auto Blog"
+  # Voice/instructions handed to Claude for every post.
+  style: >
+    Write in a clear, engaging voice for a technically literate but general
+    audience. Lead with the takeaway. Avoid hype and filler.
+  # Target length of generated posts, in words (a soft target).
+  target_words: 700
+
+generator:
+  type: claude
+  model: claude-opus-4-8
+  # "high" balances quality and cost; use "max" for the most thorough drafts.
+  effort: high
+
+sources:
+  - type: rss
+    name: Hacker News Front Page
+    url: https://hnrss.org/frontpage
+    # Pull at most this many items per run from this source.
+    max_items: 3
+
+# Posts are always written to Markdown. Optionally also push to a platform
+# via the webhook publisher (uncomment and configure).
+publishers:
+  - type: markdown
+    output_dir: content/posts
+  # - type: webhook
+  #   # Reads URL/token from AUTOBLOG_WEBHOOK_URL / AUTOBLOG_WEBHOOK_TOKEN if unset.
+  #   url: https://example.com/api/posts
+  #   token_env: AUTOBLOG_WEBHOOK_TOKEN
