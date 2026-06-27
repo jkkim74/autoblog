@@ -16,6 +16,7 @@ venv/
 # Secrets & local config
 .env
 config.yaml
+.claude/settings.local.json
 
 # Runtime state (which items were already published)
 .autoblog-state.json

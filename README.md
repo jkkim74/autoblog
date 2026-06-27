@@ -107,6 +107,30 @@ and a regex scan flags over-promise phrasing (무조건/100%/보장 …) into `r
 **Test paste fidelity early:** Naver's SmartEditor can normalize inline styles, so
 confirm the 22/18px formatting survives a real paste before relying on it.
 
+### Generation engines
+
+The 5-artifact package can be produced two ways — both end in the same
+deterministic `assemble` step (HTML rendering, forbidden-word scan, file layout):
+
+1. **Claude Code subagents (no API key)** — run `/blog-write "<키워드>"` in Claude
+   Code. The `article-writer` and `quality-reviewer` subagents draft the content,
+   the orchestrator writes `content/_draft/article.json`, then runs `autoblog
+   assemble`. Uses your Claude Code login — no Anthropic key, no AWS. For
+   unattended scheduling, drive it headlessly: `claude -p "/blog-write 키워드"` on
+   a machine where Claude Code is logged in.
+2. **Direct API / Bedrock (optional)** — `autoblog write "<키워드>"` calls the model
+   via the `anthropic`/Bedrock SDK (needs a key or AWS IAM). Same artifacts.
+
+`autoblog assemble <article.json>` is the shared deterministic step — it makes no
+API call and needs no credentials:
+
+```bash
+autoblog assemble content/_draft/article.json -o content
+```
+
+The input JSON matches the generator schema (`title_candidates`, `outline_md`,
+`body_md`, `seo`, `review`).
+
 ### Repeated / scheduled runs
 
 `autoblog` is built to run on a schedule (cron, Task Scheduler, CI). It records

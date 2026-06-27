@@ -98,6 +98,29 @@ Config for this flow (`config.forbidden_expressions`, `config.naver`) is
 optional: `write` falls back to `config.default_config()` when no config file
 exists, so a bare `autoblog write "<keyword>"` works.
 
+### Two generation engines, one deterministic assembler
+
+The Naver package can be produced by either engine, but **both converge on the
+same deterministic step**, so keep that step credential-free and testable:
+
+- **`autoblog assemble <article.json>`** (`cli.py:_cmd_assemble`) — takes an
+  article JSON (generator schema), builds an `Article` via
+  `models.article_from_dict`, merges `validation.scan_forbidden`, and writes the
+  5 artifacts via `NaverArtifactPublisher`. **No API call, no key.**
+  `models.article_from_dict` is shared by this command and `NaverArticleGenerator`
+  — the JSON→Article mapping lives in one place; don't duplicate it.
+- **Claude Code subagents** (`.claude/`) — the key-free engine. `.claude/commands/
+  blog-write.md` (`/blog-write <키워드>`) orchestrates the `article-writer` and
+  `quality-reviewer` subagents (`.claude/agents/*.md`), writes
+  `content/_draft/article.json`, then calls `autoblog assemble`. The subagents
+  return **JSON only** and do not render HTML — HTML is the deterministic
+  renderer's job. Unattended use is `claude -p "/blog-write 키워드"`.
+- **Direct API / Bedrock** (`generators/naver.py`) — optional engine for those
+  with a key or AWS; produces the same `Article` and is published the same way.
+
+When changing the article JSON shape, update `generators/naver.py:_ARTICLE_SCHEMA`,
+`models.article_from_dict`, and the two `.claude/agents/*.md` output specs together.
+
 ### Claude generator specifics
 
 `generators/claude.py` is the only code that calls the Anthropic API. It uses

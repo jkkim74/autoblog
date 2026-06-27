@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
+
+from slugify import slugify
 
 
 @dataclass(slots=True)
@@ -67,3 +70,39 @@ class Article:
     seo: Seo = field(default_factory=Seo)
     review: ReviewNotes = field(default_factory=ReviewNotes)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def slugify_title(value: str) -> str:
+    """Slug for folder/file names. allow_unicode keeps Korean readable."""
+    return slugify(value, allow_unicode=True)[:80]
+
+
+def article_from_dict(data: dict[str, Any], keyword: str) -> Article:
+    """Build an Article from the generator's structured-output JSON.
+
+    Shared by the Claude generator and the `assemble` CLI so the JSON->Article
+    mapping lives in one place.
+    """
+    candidates = list(data.get("title_candidates", []))
+    title = candidates[0] if candidates else keyword
+    seo = data.get("seo", {})
+    review = data.get("review", {})
+    return Article(
+        keyword=keyword,
+        title=title,
+        slug=slugify_title(title) or slugify_title(keyword) or "article",
+        outline_md=data.get("outline_md", ""),
+        body_md=data["body_md"],
+        title_candidates=candidates,
+        seo=Seo(
+            title=seo.get("title", title),
+            description=seo.get("description", ""),
+            tags=list(seo.get("tags", [])),
+            longtail=list(seo.get("longtail", [])),
+        ),
+        review=ReviewNotes(
+            warnings=list(review.get("warnings", [])),
+            fact_checks=list(review.get("fact_checks", [])),
+            image_placeholders=list(review.get("image_placeholders", [])),
+        ),
+    )

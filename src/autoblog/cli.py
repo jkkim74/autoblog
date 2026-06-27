@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -49,6 +50,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_cmd.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
 
+    assemble_cmd = sub.add_parser(
+        "assemble",
+        help="Build the 5-artifact review package from an article JSON (no API call). "
+        "Used by the Claude Code /blog-write subagent flow.",
+    )
+    assemble_cmd.add_argument("input", help="Path to article JSON (the generator schema).")
+    assemble_cmd.add_argument(
+        "-c", "--config", default="config.yaml", help="Path to config YAML (optional)."
+    )
+    assemble_cmd.add_argument(
+        "-o", "--output", default="content", help="Root dir for the article folder."
+    )
+    assemble_cmd.add_argument(
+        "--keyword", default="", help="Topic keyword (default: JSON 'keyword' or first title)."
+    )
+    assemble_cmd.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -60,8 +78,21 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_run(args)
     if args.command == "write":
         return _cmd_write(args)
+    if args.command == "assemble":
+        return _cmd_assemble(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+def _load_config_or_default(path: str):
+    """Load config if the file exists, else fall back to defaults. May exit(2)."""
+    if Path(path).exists():
+        try:
+            return load_config(path)
+        except ConfigError as exc:
+            print(f"Config error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+    return default_config()
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -93,14 +124,7 @@ def _cmd_write(args: argparse.Namespace) -> int:
     from .publishers.naver_artifact import NaverArtifactPublisher
     from .validation import scan_forbidden
 
-    if Path(args.config).exists():
-        try:
-            config = load_config(args.config)
-        except ConfigError as exc:
-            print(f"Config error: {exc}", file=sys.stderr)
-            return 2
-    else:
-        config = default_config()
+    config = _load_config_or_default(args.config)
 
     article = NaverArticleGenerator(config.generator, config.blog).generate(args.keyword)
     # Merge the deterministic forbidden-word scan into the human-review warnings.
@@ -116,6 +140,44 @@ def _cmd_write(args: argparse.Namespace) -> int:
             f"사실확인 {len(article.review.fact_checks)}건 (dry-run: 파일 미생성)"
         )
         return 0
+
+    folder = NaverArtifactPublisher(
+        output_root=args.output,
+        heading_px=config.naver.heading_px,
+        body_px=config.naver.body_px,
+    ).publish(article)
+
+    print(f"\n# {article.title}")
+    print(f"산출물: {folder}")
+    if article.review.warnings:
+        print("\n검수 경고:")
+        for warning in article.review.warnings:
+            print(f"  - {warning}")
+    return 0
+
+
+def _cmd_assemble(args: argparse.Namespace) -> int:
+    # Deterministic: no API call, no key. Reuses the same publisher as `write`.
+    from .models import article_from_dict
+    from .publishers.naver_artifact import NaverArtifactPublisher
+    from .validation import scan_forbidden
+
+    try:
+        data = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Could not read article JSON: {exc}", file=sys.stderr)
+        return 2
+    if "body_md" not in data:
+        print("article JSON is missing required 'body_md'.", file=sys.stderr)
+        return 2
+
+    config = _load_config_or_default(args.config)
+    keyword = args.keyword or data.get("keyword") or (data.get("title_candidates") or [""])[0]
+
+    article = article_from_dict(data, keyword)
+    article.review.warnings.extend(
+        scan_forbidden(article.body_md, config.forbidden_expressions)
+    )
 
     folder = NaverArtifactPublisher(
         output_root=args.output,

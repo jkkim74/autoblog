@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import json
 
-from slugify import slugify
-
 from ..config import BlogConfig, GeneratorConfig
-from ..models import Article, ReviewNotes, Seo
+from ..models import Article, article_from_dict
 from .client import build_client, resolve_model_id
 
 _ARTICLE_SCHEMA = {
@@ -117,32 +115,4 @@ class NaverArticleGenerator:
                 f"{message.stop_reason!r}): {exc}"
             ) from exc
 
-        candidates = list(data.get("title_candidates", []))
-        title = candidates[0] if candidates else keyword
-        seo = data["seo"]
-        review = data["review"]
-
-        return Article(
-            keyword=keyword,
-            title=title,
-            slug=_slug(title) or _slug(keyword) or "article",
-            outline_md=data["outline_md"],
-            body_md=data["body_md"],
-            title_candidates=candidates,
-            seo=Seo(
-                title=seo.get("title", title),
-                description=seo.get("description", ""),
-                tags=list(seo.get("tags", [])),
-                longtail=list(seo.get("longtail", [])),
-            ),
-            review=ReviewNotes(
-                warnings=list(review.get("warnings", [])),
-                fact_checks=list(review.get("fact_checks", [])),
-                image_placeholders=list(review.get("image_placeholders", [])),
-            ),
-        )
-
-
-def _slug(value: str) -> str:
-    # allow_unicode keeps Korean readable in folder names instead of dropping it.
-    return slugify(value, allow_unicode=True)[:80]
+        return article_from_dict(data, keyword)
